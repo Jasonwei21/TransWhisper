@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>语音转文字</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="app" v-cloak>
+
+  <!-- ============ 顶栏（Top App Bar） ============ -->
+  <header class="top-bar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="title">语音转文字</div>
+        <div class="subtitle">whisper.cpp 本地版 · 文件不上传，全部在本机处理</div>
+      </div>
+    </div>
+
+    <div class="metrics" title="系统监控">
+      <span class="metric-chip" :class="tempClass(metrics && metrics.cpu_temp)"
+            :title="metrics && metrics.cpu_temp == null ? '此机型未提供温度读数' : 'CPU 温度'">
+        CPU 温度 {{ fmtTemp(metrics && metrics.cpu_temp) }}
+      </span>
+      <span class="metric-chip" :class="tempClass(metrics && metrics.gpu_temp)"
+            :title="metrics && metrics.gpu_temp == null ? '此机型未提供 GPU 温度（多数笔记本不开放此读数）' : 'GPU 温度'">
+        GPU 温度 {{ fmtTemp(metrics && metrics.gpu_temp) }}
+      </span>
+      <span class="metric-chip" :class="pctClass(metrics && metrics.cpu_pct, 80, 60)">CPU {{ fmtPct(metrics && metrics.cpu_pct) }}</span>
+      <span class="metric-chip" :class="pctClass(metrics && metrics.mem_pct, 85, 70)">内存 {{ fmtPct(metrics && metrics.mem_pct) }}</span>
+    </div>
+
+    <button class="btn tonal small" @click="docOpen = true">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+      使用说明
+    </button>
+
+    <div class="status-pill" :class="healthState">{{ healthText }}</div>
+  </header>
+
+  <main class="layout">
+
+    <!-- ============ 上：进度与日志 ============ -->
+    <section class="split">
+
+      <div class="card">
+        <div class="card-head">
+          <h2>任务进度</h2>
+          <div class="counts">{{ countsText }}</div>
+        </div>
+        <div class="progress-track"><div class="progress-bar" :style="{ width: progressPct }"></div></div>
+        <ul class="task-list">
+          <li v-if="!tasks.length" class="empty">暂无任务</li>
+          <li v-for="f in visibleTasks" :key="f.name + f.status">
+            <span class="name" :title="f.error ? f.name + '\n' + f.error : f.name">{{ f.name }}</span>
+            <span class="chip" :class="f.status">{{ statusText(f.status) }}</span>
+            <span class="time">{{ f.elapsed ? f.elapsed.toFixed(1) + 's' : '' }}</span>
+          </li>
+          <li v-if="taskMore" class="empty">{{ taskMore }}</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>运行日志</h2>
+          <label class="switch-label">
+            <input type="checkbox" v-model="autoScroll">
+            <span class="switch"></span>
+            <span>自动滚动</span>
+          </label>
+        </div>
+        <div class="log" ref="logBox">{{ logText }}</div>
+      </div>
+
+    </section>
+
+    <!-- ============ 下：任务设置（操作） ============ -->
+    <section class="card setup">
+      <div class="card-head">
+        <h2>任务设置</h2>
+        <div class="actions">
+          <button class="btn filled" :disabled="running" @click="startJob">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            开始转写
+          </button>
+          <button class="btn danger" :disabled="!running" @click="stopJob">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+            停止
+          </button>
+        </div>
+      </div>
+
+      <div class="sys-info">{{ sysInfoText }}</div>
+
+      <div class="setup-grid">
+
+        <!-- 第一行左：输入来源 -->
+        <div class="field">
+          <div class="field-label">输入来源 <span class="hint">音频 / 视频，可混选多个</span></div>
+          <div class="row">
+            <button class="btn tonal" @click="pickAndAdd('files')">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+              选择文件
+            </button>
+            <button class="btn tonal" @click="pickAndAdd('dir')">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              选择文件夹
+            </button>
+            <button class="btn text" @click="clearInputs">清空</button>
+          </div>
+          <div class="text-field">
+            <input v-model="pathDraft" @keydown.enter.prevent="addFromDraft"
+                   placeholder="或粘贴路径后回车，如 D:\录音\会议.mp4">
+          </div>
+          <ul class="file-list">
+            <li v-if="!inputs.length" class="empty">还没有选择文件</li>
+            <li v-for="(item, idx) in inputs" :key="item.path">
+              <span class="file-icon">{{ item.isDir ? '📁' : '🎵' }}</span>
+              <span class="name" :title="item.path">{{ item.isDir ? item.path : item.name }}</span>
+              <button class="rm" title="移除" @click="removeInput(idx)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 第一行右：结果目录 + 输出格式 -->
+        <div class="field">
+          <div class="field-label">转写结果目录 <span class="hint">结果只保存到这里</span></div>
+          <div class="row">
+            <div class="text-field grow">
+              <input v-model="outputDirDraft" @change="applyOutputDir" placeholder="选择结果保存位置">
+            </div>
+            <button class="btn tonal" @click="pickOutputDir">浏览</button>
+          </div>
+          <div class="row">
+            <button class="btn tonal" @click="openResultsFolder">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              打开结果文件夹
+            </button>
+          </div>
+          <div class="field-label" style="margin-top:14px">输出格式</div>
+          <div class="checks">
+            <label class="check">
+              <input type="checkbox" value="srt" v-model="formats"><span class="box"></span>
+              <span>SRT 字幕</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" value="txt" v-model="formats"><span class="box"></span>
+              <span>TXT 纯文本</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 第二行左：模型 + 语言 -->
+        <div class="field two">
+          <div>
+            <div class="field-label">识别模型</div>
+            <div class="select-field">
+              <select v-model="model">
+                <option v-for="m in models" :key="m.name" :value="m.name">
+                  {{ shortModel(m.name) }}（{{ m.size_gb }}GB）
+                </option>
+              </select>
+            </div>
+            <div class="hint">{{ modelHint }}</div>
+          </div>
+          <div>
+            <div class="field-label">语言</div>
+            <div class="select-field">
+              <select v-model="language">
+                <option value="auto">自动检测</option>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+                <option value="ko">한국어</option>
+                <option value="yue">粤语</option>
+                <option value="ru">Русский</option>
+                <option value="de">Deutsch</option>
+                <option value="fr">Français</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第二行右：提示词 -->
+        <div class="field">
+          <div class="field-label">提示词 <span class="hint">写上人名、术语，识别更准</span></div>
+          <div class="text-field textarea">
+            <textarea v-model="prompt" rows="2" placeholder="例：张伟、企业微信、腾讯云"></textarea>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 高级设置 -->
+      <details class="advanced" :open="advOpen" @toggle="advOpen = $event.target.open">
+        <summary>
+          <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+          高级设置
+        </summary>
+
+        <div class="field two">
+          <div>
+            <div class="field-label">线程数 <span class="hint">{{ threadsHint }}</span></div>
+            <div class="text-field"><input type="number" min="0" v-model="threads"></div>
+          </div>
+          <div>
+            <div class="field-label">并行文件数 <span class="hint">每进程约 3~4GB 内存</span></div>
+            <div class="text-field"><input type="number" min="1" v-model="workers"></div>
+          </div>
+        </div>
+
+        <div class="checks switches">
+          <label class="switch-label"><input type="checkbox" v-model="translate"><span class="switch"></span><span>翻译成英文</span></label>
+          <label class="switch-label"><input type="checkbox" v-model="gpu"><span class="switch"></span><span>启用 GPU 加速</span></label>
+          <label class="switch-label"><input type="checkbox" v-model="flashAttn"><span class="switch"></span><span>Flash Attention（GPU 模式下更省显存）</span></label>
+          <label class="switch-label"><input type="checkbox" v-model="overwrite"><span class="switch"></span><span>已有结果也重转</span></label>
+          <label class="switch-label"><input type="checkbox" v-model="flat"><span class="switch"></span><span>结果平铺（不分子目录）</span></label>
+        </div>
+
+        <div class="hint" :class="{ warn: gpuHintWarn }" v-if="gpuHint">{{ gpuHint }}</div>
+      </details>
+
+      <div class="hint">{{ estimateText }}</div>
+    </section>
+
+  </main>
+
+  <!-- ============ 页脚（版权信息） ============ -->
+  <footer class="app-footer">
+    <div class="footer-line">
+      语音转文字（Speech-to-Text）
+      <span class="footer-ver">v{{ version || '1.0.0' }}</span>
+      · 开源项目 Open Source Project
+    </div>
+    <div class="footer-line copy">Copyright © 2026 Jasonwei · MIT License</div>
+  </footer>
+
+  <!-- ============ 使用说明弹层（内建 Markdown 阅读器） ============ -->
+  <transition name="fade">
+    <div class="dialog-scrim" v-if="docOpen" @click.self="docOpen = false">
+      <div class="dialog" role="dialog" aria-label="使用说明">
+        <div class="dialog-head">
+          <h2>使用说明</h2>
+          <span class="hint">{{ readmeSource ? '来源 ' + readmeSource : '' }}</span>
+          <button class="icon-btn" title="关闭" @click="docOpen = false">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div class="dialog-body md-body" v-html="readmeHtml" @click="onMdClick"></div>
+        <div class="dialog-foot">
+          <button class="btn tonal" @click="docOpen = false">关闭</button>
+        </div>
+      </div>
+    </div>
+  </transition>
+
+  <!-- Snackbar -->
+  <transition name="snack">
+    <div class="snackbar" v-if="snack.show">{{ snack.text }}</div>
+  </transition>
+
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/marked.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

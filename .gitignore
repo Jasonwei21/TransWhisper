@@ -1,0 +1,42 @@
+# ==========================================================
+# 语音转文字（whisper.cpp 本地版）—— GitHub 仓库忽略规则
+# 本仓库只上传源码与文档：模型、引擎二进制、便携版整包一律不传。
+# 模型请从 https://huggingface.co/ggerganov/whisper.cpp/tree/main 自行下载。
+# ==========================================================
+
+# 模型与第三方二进制（数 GB，且不是本仓库产出）
+*.bin
+*.exe
+*.dll
+*.gguf
+tools/
+_engine_cpu/
+whisper/
+
+# 便携版整包与本机 Python 运行环境
+便携版/
+python/
+校验值-SHA256.txt
+使用说明.txt
+
+# 本机配置、转写结果、运行残留
+config.json
+转写结果/
+_uploads/
+_gui_out/
+output/
+*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Windows 快捷方式
+*.lnk
